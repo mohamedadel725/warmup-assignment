@@ -26,7 +26,7 @@ function getShiftDuration(startTime, endTime) {
 
     let startSec = toSeconds(startTime);
     let endSec = toSeconds(endTime);
-    if (endSec < startSec) endSec += 24 * 3600;
+    if (endSec < startSec) endSec += 24 * 3600;// Handle overnight shifts
 
     return toHMS(endSec - startSec);
 }
@@ -40,7 +40,7 @@ function getShiftDuration(startTime, endTime) {
 // Returns: string formatted as h:mm:ss
 // ============================================================
 function getIdleTime(startTime, endTime) {
-   function toSeconds(timeStr) {
+   function toSeconds(timeStr) {// Convert hh:mm:ss am/pm → seconds
         let [time, modifier] = timeStr.trim().split(" ");
         let [hours, minutes, seconds] = time.split(":").map(Number);
 
@@ -58,19 +58,19 @@ function getIdleTime(startTime, endTime) {
 
     let startSec = toSeconds(startTime);
     let endSec = toSeconds(endTime);
-
+// Handle overnight shifts
     if (endSec < startSec) endSec += 24 * 3600;
-
+// Delivery window: 8:00 AM → 10:00 PM
     const deliveryStart = 8 * 3600;   
     const deliveryEnd = 22 * 3600;    
 
     let idle = 0;
 
-    if (startSec < deliveryStart) {
+    if (startSec < deliveryStart) {// Idle before 8 AM
         idle += Math.min(deliveryStart - startSec, endSec - startSec);
     }
 
-    if (endSec > deliveryEnd) {
+    if (endSec > deliveryEnd) {// Idle after 10 PM
         idle += endSec - Math.max(startSec, deliveryEnd);
     }
 
@@ -196,10 +196,10 @@ let shiftDuration = getShiftDuration(shiftObj.startTime, shiftObj.endTime);
 // ============================================================
 function setBonus(textFile, driverID, date, newValue) {
     let data = fs.readFileSync(textFile, "utf-8").trim().split("\n");
-
+// Header stays the same
     let header = data[0];
     let rows = data.slice(1);
-   
+   // Update matching record
     for (let i = 0; i < rows.length; i++) {
         let cols = rows[i].split(",");
 
@@ -212,7 +212,7 @@ function setBonus(textFile, driverID, date, newValue) {
         }
     }
 
-   
+   // Write back to file
     let output = [header, ...rows].join("\n");
     fs.writeFileSync(textFile, output, "utf-8");
 }
@@ -289,9 +289,9 @@ function getTotalActiveHoursPerMonth(textFile, driverID, month) {
         let cols = row.split(",");
         let id = cols[0];
         let date = cols[2];
-        let activeTime = cols[7];
+        let activeTime = cols[7];// ActiveTime column
        
-        let recordMonth = date.split("-")[1];
+        let recordMonth = date.split("-")[1];// Extract month from date (YYYY-MM-DD → MM)
 
         if (id === driverID && recordMonth === month) {
             totalSeconds += toSeconds(activeTime);
@@ -315,7 +315,7 @@ function getTotalActiveHoursPerMonth(textFile, driverID, month) {
 
 
 function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, month) {
-    month = month.toString().padStart(2, "0");
+    month = month.toString().padStart(2, "0"); // Normalize month to two digits
 
     let data = fs.readFileSync(textFile, "utf-8").trim().split("\n");
     let rows = data.slice(1);
@@ -331,9 +331,9 @@ function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, mont
         let seconds = totalSeconds % 60;
         return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
     }
-
-    const normalQuota = 8 * 3600 + 24 * 60; 
-    const eidQuota = 6 * 3600;              
+   // Quotas
+    const normalQuota = 8 * 3600 + 24 * 60; // 8h24m
+    const eidQuota = 6 * 3600;              // 6h
 
     let totalRequired = 0;
 
@@ -351,7 +351,7 @@ function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, mont
         }
     }
 
-
+  // Adjust for bonuses (each bonus reduces required hours by 1 hour)
     totalRequired -= bonusCount * 3600;
     if (totalRequired < 0) totalRequired = 0;
 
@@ -369,23 +369,19 @@ function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, mont
 // Returns: integer (net pay)
 // ============================================================
 function getNetPay(driverID, actualHours, requiredHours, rateFile) {
-    function toSeconds(timeStr) {
+function toSeconds(timeStr) {  // Helper: convert h:mm:ss → seconds
         let [hours, minutes, seconds] = timeStr.split(":").map(Number);
         return hours * 3600 + minutes * 60 + seconds;
     }
-
+  // Read driverRates file
     let data = fs.readFileSync(rateFile, "utf-8").trim().split("\n");
-    let rows = data.slice(1); // skip header if present
+    let rows = data.slice(1); 
 
-    let basePay = 0;
-    let tier = 0;
-
+    let rate = 0;
     for (let row of rows) {
         let cols = row.split(",");
         if (cols[0] === driverID) {
-            // Format: driverID,basePay,tier
-            basePay = parseFloat(cols[1]);
-            tier = parseInt(cols[2]);
+            rate = parseFloat(cols[1]); 
             break;
         }
     }
@@ -396,29 +392,15 @@ function getNetPay(driverID, actualHours, requiredHours, rateFile) {
     let actualHoursNum = actualSec / 3600;
     let requiredHoursNum = requiredSec / 3600;
 
-    // Calculate missing hours
-    let missingHours = requiredHoursNum - actualHoursNum;
-    if (missingHours < 0) missingHours = 0;
+    let netPay = 0;
 
-    // Tier allowances
-    let allowance = 0;
-    if (tier === 1) allowance = 50;
-    else if (tier === 2) allowance = 20;
-    else if (tier === 3) allowance = 10;
-    else if (tier === 4) allowance = 3;
+    if (actualHoursNum >= requiredHoursNum) {
+        netPay = actualHoursNum * rate;
+    } else {
+        netPay = (actualHoursNum / requiredHoursNum) * (requiredHoursNum * rate);
+    }
 
-    // Apply allowance
-    missingHours -= allowance;
-    if (missingHours < 0) missingHours = 0;
-
-    // Deduction formula
-    let deductionRatePerHour = Math.floor(basePay / 185);
-    let salaryDeduction = missingHours * deductionRatePerHour;
-
-    let netPay = basePay - salaryDeduction;
-    if (netPay < 0) netPay = 0;
-
-    return netPay.toFixed(2);
+    return netPay.toFixed(2); // return as string with 2 decimals
 }
 
 
